@@ -59,4 +59,5 @@ app.get('/decline', (req, res) => res.send(`
   <h1 style="color:red;">❌ Ödəniş rədd edildi!</h1>
   </body></html>`));
 
-module.exports = app;
+- module.exports = app;
++ module.exports = (req, res) => app(req, res);
