@@ -1,52 +1,47 @@
-// api/index.js
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const axios = require('axios');
-const crypto = require('crypto');
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 
 const MERCHANT_ID = process.env.MERCHANT_ID;
-const SECRET_KEY  = process.env.SECRET_KEY;
-const API_URL     = 'https://api.payriff.com/v1/createOrder';
+const SECRET_KEY = process.env.SECRET_KEY;
+const API_URL = 'https://api.payriff.com/api/v2/invoices';
 
-/* ---------- imza yoxlaması ---------- */
-function isValidPayriff(body, sentHash) {
-  if (!sentHash) return false;
-  const calc = crypto
-    .createHash('sha256')
-    .update(JSON.stringify(body) + SECRET_KEY)
-    .digest('hex');
-  return calc === sentHash;
-}
-
-/* ---------- ödəniş linki yarad ---------- */
 app.get('/pay', async (req, res) => {
-  const amount = Math.round((Number(req.query.amount) || 100) * 100); // qəpik
-  const desc   = req.query.desc || 'Test';
+  const amount = Number(req.query.amount) || 1; // Decimal məbləğ (məs. 5 AZN)
+  const desc = req.query.desc || 'Test';
+  const baseUrl = `${req.protocol}://${req.get('host')}`;
   const payload = {
-    merchantId: MERCHANT_ID,
-    amount,
-    currency: 'AZN',
-    description: desc,
-    language: 'AZ',
-    redirectUrl: `${req.protocol}://${req.get('host')}/ok`,
-    callbackUrl: `${req.protocol}://${req.get('host')}/webhook`
+    merchant: MERCHANT_ID,
+    body: {
+      amount,
+      currencyType: 'AZN',
+      description: desc,
+      languageType: 'AZ',
+      approveURL: `${baseUrl}/ok`,
+      cancelURL: `${baseUrl}/cancel`,
+      declineURL: `${baseUrl}/decline`,
+      sendEmail: true // Müşteriyə email göndər (opsiyonal)
+    }
   };
   try {
     const { data } = await axios.post(API_URL, payload, {
-      headers: { Authorization: `Bearer ${SECRET_KEY}` }
+      headers: { Authorization: SECRET_KEY }
     });
-    res.redirect(data.payload.paymentUrl);
+    if (data.code === '00000') {
+      res.redirect(data.payload.paymentUrl);
+    } else {
+      res.status(400).send('API xətası: ' + (data.message || 'Naməlum xəta'));
+    }
   } catch (e) {
     res.status(400).send('Sorğu xətası: ' + (e.response?.data?.message || e.message));
   }
 });
 
-/* ---------- uğurlu səhifə ---------- */
 app.get('/ok', (req, res) => res.send(`
   <html><body style="font-family:sans-serif;text-align:center;padding-top:40px;">
   <h1 style="color:green;">✅ Ödəniş uğurlu!</h1>
@@ -54,15 +49,14 @@ app.get('/ok', (req, res) => res.send(`
   <button onclick="window.parent.postMessage({status:'paid'},'*')">Rork-a xəbər ver</button>
   </body></html>`));
 
-/* ---------- webhook + imza ---------- */
-app.post('/webhook', (req, res) => {
-  const sentHash = req.headers['x-payriff-signature'];
-  if (!isValidPayriff(req.body, sentHash)) {
-    console.log('❌ Yalan webhook');
-    return res.sendStatus(400);
-  }
-  console.log('✅ Webhook imza doğru:', req.body);
-  res.sendStatus(200);
-});
+app.get('/cancel', (req, res) => res.send(`
+  <html><body style="font-family:sans-serif;text-align:center;padding-top:40px;">
+  <h1 style="color:orange;">❌ Ödəniş ləğv edildi!</h1>
+  </body></html>`));
+
+app.get('/decline', (req, res) => res.send(`
+  <html><body style="font-family:sans-serif;text-align:center;padding-top:40px;">
+  <h1 style="color:red;">❌ Ödəniş rədd edildi!</h1>
+  </body></html>`));
 
 module.exports = app;
